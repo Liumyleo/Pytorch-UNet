@@ -18,7 +18,7 @@ For example, to run the model on teacher mode, you would type:
 ```
 python train.py --mode=teacher
 ```
-After training the student model and the teacher model, we trained the distillation model.
+After training the student model and the teacher model, we train the distillation model.
 ```
 python train_dis.py 
 ```
