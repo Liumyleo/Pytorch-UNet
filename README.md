@@ -1,5 +1,5 @@
-# Pytorch
-Exploring knowledge distillation of DNNs for efficient hardware solutions
+# Pytorch-UNet
+Exploring knowledge distillation of unet for audio super resolution
 ## Requirements
 * `torch==0.4.0`
 * `torchsummary==1.5`
