@@ -1,0 +1,162 @@
+import numpy as np
+import h5py
+from hyperparams import Hyperparams as hp
+import torch
+import torch.utils.data as data
+import torch.nn as nn
+import torch.optim as optim
+import os
+from tqdm import tqdm
+import random
+import argparse
+
+
+def get_arguments():
+    parser = argparse.ArgumentParser(description='UNet network')
+    parser.add_argument('--mode', type=str, default='student',
+                        help='Choose training mode, student or teacher')
+    return parser.parse_args()
+
+
+class audioDatasets(torch.utils.data.Dataset):
+    def __init__(self, h5_path):
+        super().__init__()
+        print("h5 path:{}".format(h5_path))
+        with h5py.File(h5_path, 'r') as hf:
+            print('List of arrays in input file:', hf.keys())
+            self.x = torch.from_numpy(np.array(hf.get('data')).reshape(-1, 1, 1, hp.win_length))
+            self.y = torch.from_numpy(np.array(hf.get('label')).reshape(-1, 1, 1, hp.win_length))
+        print('shape of x:', self.x.size())
+        print('shape of y:', self.y.size())
+
+    def __getitem__(self, index):
+        data_pair = (self.x[index], self.y[index])
+        # print(index)
+        return data_pair
+
+    def __len__(self):
+        return len(self.x)
+
+
+def reduce_mean(x, axis):
+    sorted(axis)
+    axis = list(reversed(axis))
+    for d in axis:
+        x = torch.mean(x, dim=d)
+    return x
+
+
+def rmse(y, y_pred):
+    sqrt_l2_loss = torch.sqrt(reduce_mean((y_pred - y)**2, [1, 2, 3]))
+    avg_sqrt_l2_loss = torch.mean(sqrt_l2_loss, 0)
+    return avg_sqrt_l2_loss
+
+
+def snr(y, y_pred, device):
+    sqrt_l2_loss = torch.sqrt(reduce_mean((y_pred - y)**2, [1, 2, 3]))
+    sqrt_l2_norm = torch.sqrt(reduce_mean(y**2, axis=[1, 2, 3]))
+    snr = 20 * torch.log(sqrt_l2_norm / (sqrt_l2_loss + 1e-8) + 1e-8) / torch.log(torch.tensor(10.).to(device))
+    avg_snr = reduce_mean(snr, axis=[0])
+    return avg_snr
+
+
+def LSDBase(input1, input2):
+    x = torch.squeeze(input1)
+    x = torch.stft(x, hp.win_length, hp.win_length)
+    x = torch.log(torch.abs(x)**2 + 1e-8)
+    x_hat = torch.squeeze(input2)
+    x_hat = torch.stft(x_hat, hp.win_length, hp.win_length)
+    x_hat = torch.log(torch.abs(x_hat)**2 + 1e-8)
+    lsd = reduce_mean(torch.sqrt(reduce_mean(torch.mul(x-x_hat, x-x_hat), axis=[2, 3]))+1e-8, axis=[0])
+
+    return lsd
+
+
+def train(dataloader, model, optimizer, device, scheduler, epoch, step_per_epoch):
+    loss_all = []
+    snr_all = []
+    lsd_all = []
+    desc = "ITERATION - loss: {:.4f} - snr: {:.4f} - lsd: {:.4f} "
+    t = tqdm(dataloader, total=step_per_epoch, desc=desc.format(0, 0, 0))
+
+    for (x, y) in t:
+        x, y = x.to(device), y.to(device)
+        model = model.train()
+        # model.to(device)
+        output = model(x)
+
+        # print("oooooooo:", output.grad_fn)
+        loss = rmse(y, output).cuda()
+        snr_metrics = snr(y, output, device).cuda()
+        lsd_metrics = LSDBase(y, output).cuda()
+        loss_all.append(loss.item())
+        snr_all.append(snr_metrics.item())
+        lsd_all.append(lsd_metrics.item())
+        t.set_description("ITERATION - loss: {:.4f} - snr: {:.4f} - lsd: {:.4f}".format(loss.item(),
+                                                                                        snr_metrics.item(),
+                                                                                        lsd_metrics.item()))
+        t.refresh()
+        optimizer.zero_grad()
+        loss.backward()
+        scheduler.step()
+        optimizer.step()
+    loss_mean = np.mean(loss_all)
+    snr_mean = np.mean(snr_all)
+    lsd_mean = np.mean(lsd_all)
+    print("training epoch:{}, global_step:{}, loss:{:.6f}, snr:{:.6f}, lsd:{:.6f}".format(
+        epoch, epoch*step_per_epoch, loss_mean, snr_mean, lsd_mean))
+    return loss_mean
+
+
+if __name__ == "__main__":
+    args = get_arguments()
+    try:
+        os.mkdir(hp.model_path)
+    except:
+        pass
+    torch.manual_seed(7)  # cpu
+    torch.cuda.manual_seed(7)  # gpu
+    np.random.seed(7)  # numpy
+    random.seed(7)  # random and transforms
+    torch.backends.cudnn.deterministic = True  # cudnn
+
+    def worker_init_fn(worker_id):
+        np.random.seed(7 + worker_id)
+
+    use_cuda = torch.cuda.is_available()
+    device = torch.device("cuda" if use_cuda else "cpu")
+
+    if args.mode == 'teacher':
+        from unet.unet_teacher import UNet
+        n_filters = hp.n_filters_teacher
+
+    elif args.mode == 'student':
+        from unet.unet_student import UNet
+        n_filters = hp.n_filters_student
+
+    trainset = audioDatasets(hp.h5_path_train_unet)
+    # kwargs = {'num_workers': 4} if use_cuda else {}
+    trainloader = data.DataLoader(trainset, batch_size=hp.batch_size, shuffle=True,
+                                  num_workers=0, worker_init_fn=worker_init_fn)
+    step_per_epoch = len(trainloader)
+    print("step_per_epoch:", step_per_epoch)
+    unet = UNet(n_filters)
+    unet.cuda()
+    print(unet)
+    print("id: ", os.getpid())
+    if hp.multi_gpu:
+        unet = nn.DataParallel(unet)
+    optimizer = optim.Adam(unet.parameters(), lr=0.001, betas=(0.9, 0.999), eps=1e-8, weight_decay=0.0, amsgrad=False)
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=5*step_per_epoch, gamma=0.1)
+    best_train_loss = None
+    try:
+        for epoch in range(1, 1000):
+            train_loss = train(trainloader, unet, optimizer, device, scheduler, epoch, step_per_epoch)
+            if not best_train_loss or train_loss < best_train_loss:
+                torch.save(unet.state_dict(), os.path.join(hp.model_path,
+                                                           'model_{}.pt'.format(args.mode)))
+                best_train_loss = train_loss
+                print('saved model in epoch:{}'.format(epoch))
+
+    except KeyboardInterrupt:
+        print('interrupt by self')
