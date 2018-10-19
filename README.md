@@ -1,5 +1,5 @@
-# Pytorch版UNet，包含知识蒸馏
-
+# Pytorch
+Exploring knowledge distillation of DNNs for efficient hardware solutions
 ## Requirements
 * `torch==0.4.0`
 * `torchsummary==1.5`
