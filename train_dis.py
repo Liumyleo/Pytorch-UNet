@@ -13,13 +13,6 @@ import random
 import argparse
 
 
-def get_arguments():
-    parser = argparse.ArgumentParser(description='UNet network')
-    parser.add_argument('--model_name', type=str,
-                        help='teacher model name')
-    return parser.parse_args()
-
-
 class audioDatasets(torch.utils.data.Dataset):
     def __init__(self, h5_path):
         super().__init__()
