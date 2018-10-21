@@ -15,28 +15,6 @@ def get_arguments():
     return parser.parse_args()
 
 
-def high_emphasisV4(x, sr, emphasis_freq_from, emphasis_freq_to, dB):
-    def _SNR_db_to_linear(signal_amplitude):
-        after_div_signal = 0
-        return after_div_signal * signal_amplitude
-
-    rate_low = emphasis_freq_from / sr
-    rate_high = emphasis_freq_to / sr
-    magnitude, phase = librosa.magphase(librosa.stft(x, n_fft=128))
-    S = magnitude
-    r, c = S.shape
-    cut_low = int(r * rate_low)
-    cut_high = int(r * rate_high)
-
-    S_high = S[cut_low:cut_high, :]
-    signal_amplitude = np.max(S_high) - np.min(S_high)
-    rate = _SNR_db_to_linear(signal_amplitude) / signal_amplitude
-    S[cut_low:cut_high, :] += S_high * (rate - 1)
-
-    x = librosa.core.istft(S * phase)
-    return x
-
-
 def load_test_data(path, sr):
     x_hr, _ = librosa.load(path, sr=sr)
     return x_hr
