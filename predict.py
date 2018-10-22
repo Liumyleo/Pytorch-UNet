@@ -11,7 +11,7 @@ import argparse
 def get_arguments():
     parser = argparse.ArgumentParser(description='UNet network')
     parser.add_argument('--mode', type=str, default='student',
-                        help='Which model will be predicted?')
+                        help='Which model will be predicted? student, teacher or student_dis?')
     return parser.parse_args()
 
 
