@@ -35,6 +35,7 @@ For example, to predict the model on teacher mode, you would type:
 python predict.py --mode=teacher
 ```
 ## Get snr and lsd matrics
+get the lsd, snr matric of student, student_dis, teacher model 
 ```
-python get_snr_lsd_score.py
+python get_matric.py
 ```
