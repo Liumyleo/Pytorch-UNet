@@ -28,7 +28,7 @@ usage: python predict.py --mode MODE
 
 optional arguments:
   -h, --help            show this help message and exit
-  --mode MODE           Which model will be predicted?
+  --mode MODE           Which model will be predicted? student, teacher or student_dis?
 ```
 For example, to predict the model on teacher mode, you would type:
 ```
